@@ -80,8 +80,45 @@ def record_voice(duration=3, out_path="/tmp/auth_voice.wav"):
         import soundfile as sf
         sr = 16000
         print(f"Recording {duration}s of audio — please speak now...")
-        data = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype='float32')
-        sd.wait()
+
+        # Try to auto-select a USB / camera microphone if available
+        try:
+            devs = sd.query_devices()
+        except Exception:
+            devs = []
+
+        usb_dev_index = None
+        for i, dev in enumerate(devs):
+            try:
+                if dev.get('max_input_channels', 0) > 0:
+                    name = str(dev.get('name', '')).lower()
+                    if any(k in name for k in ('usb', 'camera', 'webcam', 'logitech', 'uac')):
+                        usb_dev_index = i
+                        break
+            except Exception:
+                continue
+
+        # Record using selected device if found, otherwise default device
+        if usb_dev_index is not None:
+            print(f"Using input device #{usb_dev_index}: {devs[usb_dev_index]['name']}")
+            try:
+                data = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype='float32', device=usb_dev_index)
+                sd.wait()
+            except Exception as e:
+                print(f"Recording with selected device failed: {e}. Falling back to default device.")
+                data = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype='float32')
+                sd.wait()
+        else:
+            try:
+                data = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype='float32')
+                sd.wait()
+            except Exception:
+                raise
+
+        # Ensure shape is (N, channels) for soundfile
+        if data.ndim == 1:
+            data = data.reshape(-1, 1)
+
         sf.write(out_path, data, sr)
         print(f"Voice recording saved to {out_path}")
         return out_path
